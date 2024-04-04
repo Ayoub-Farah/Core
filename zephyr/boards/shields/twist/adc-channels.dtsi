@@ -84,8 +84,8 @@
 		ihigh: i-high {
 			compatible = "adc-channels";
 			channel-name = "I_HIGH";
-			default-gain = <0x3ba3d70a>;
-			default-offset = <0xc1200000>;
+			default-gain = <0x3cf57710>;
+			default-offset = <0x00000000>;
 			spin-pin = <26>;
 			i-high-adc1 {
 				io-channels = <&adc1 8>;

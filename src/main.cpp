@@ -259,7 +259,7 @@ void loop_communication_task()
                 break;
             case 's':
                 printk("second bridge start \n");
-                pwm_enable_sec = true;
+                pwm_enable_prim = true;
             case 'u':
                 phase_shift += 0.5;
                 break;
@@ -323,12 +323,12 @@ void loop_control_task()
 
     if(mode == IDLEMODE)
     {
-        if(pwm_enable_prim)
+        if(pwm_enable_sec)
         {
             stop_BridgePrim();
             stop_BridgeSec();
-            pwm_enable_prim = false;
             pwm_enable_sec = false;
+            pwm_enable_prim = false;
             duty_cycle = 0.1;
         }
     }
@@ -338,23 +338,24 @@ void loop_control_task()
         if(duty_cycle < 0.5)
         {
             duty_cycle += 0.05;
-        }else 
+        }
+        else 
         {
             duty_cycle = 0.5;
 
-            if(pwm_enable_sec)
-            {
-            start_BridgeSec();
+            if(pwm_enable_prim)
+            {   
+                setDuty_BridgePrim(duty_cycle);
+                start_BridgePrim();
             }
 
-            setDuty_BridgeSec(duty_cycle);
             setPhaseShift_BridgeSec(phase_shift);
         }
-        setDuty_BridgePrim(duty_cycle);
-        if(!pwm_enable_prim)
+        setDuty_BridgeSec(duty_cycle);
+        if(!pwm_enable_sec)
         {
-        pwm_enable_prim = true;
-        start_BridgePrim();
+            pwm_enable_sec = true;
+            start_BridgeSec();
         }
     }
 

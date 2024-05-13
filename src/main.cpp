@@ -118,7 +118,7 @@ void init_BridgeSec()
     spin.pwm.setSwitchConvention(PWME, PWMx1); // choose which output of the timer unit to control whith duty cycle
     spin.pwm.setMode(PWME, VOLTAGE_MODE);
     spin.pwm.initUnit(PWME); // Initialize leg unit
-    spin.pwm.setDeadTime(PWME, 200, 200); // Configure PWM dead time
+    spin.pwm.setDeadTime(PWME, 100, 100); // Configure PWM dead time
     spin.pwm.setPhaseShift(PWME, 0);
 
     /* LEG2 TIMER F initialization */
@@ -126,7 +126,7 @@ void init_BridgeSec()
     spin.pwm.setSwitchConvention(PWMF, PWMx2); // choose which output of the timer unit to control whith duty cycle
     spin.pwm.setMode(PWMF, VOLTAGE_MODE);
     spin.pwm.initUnit(PWMF); // Initialize leg unit
-    spin.pwm.setDeadTime(PWMF, 200, 200); // Configure PWM dead time
+    spin.pwm.setDeadTime(PWMF, 100, 100); // Configure PWM dead time
     spin.pwm.setPhaseShift(PWMF, 0);
 }
 

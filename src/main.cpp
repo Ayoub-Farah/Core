@@ -60,6 +60,7 @@ static bool pwm_enable_prim = false; //[bool] state of the PWM (ctrl task)
 static bool pwm_enable_sec = false; //[bool] state of the PWM (ctrl task)
 static uint32_t control_task_period = 100; //[us] period of the control task
 static float32_t phase_shift = 0;
+static uint32_t freq = 20000;
 
 static float32_t V1_low_value; //store value of V1_low (app task)
 static float32_t V2_low_value; //store value of V2_low (app task)
@@ -214,7 +215,7 @@ void setup_routine()
     data.setParameters(I_HIGH, 0.030, 0); // Calibrate VIhigh value
     data.setParameters(V_HIGH, 0.13, 0); // Calibrate VIIhigh value
 
-    spin.pwm.setFrequency(200000); // Configure PWM frequency to 200kHz
+    spin.pwm.setFrequency(freq); // Configure PWM frequency to 200kHz
 
     init_BridgePrim();
     init_BridgeSec();
@@ -222,7 +223,7 @@ void setup_routine()
     // Then declare tasks
     uint32_t communication_task_number = task.createBackground(loop_communication_task);
     uint32_t application_task_number = task.createBackground(loop_application_task);
-    task.createCritical(loop_control_task, 100); // Uncomment if you use the critical task
+    task.createCritical(loop_control_task, 100, source_tim6); // Uncomment if you use the critical task
 
     // Finally, start tasks
     task.startBackground(communication_task_number);
@@ -244,6 +245,8 @@ void loop_communication_task()
                 printk("|     press i : idle mode                |\n");
                 printk("|     press s : Start secondary side     |\n");
                 printk("|     press p : Start primary side       |\n");
+                printk("|     press f : freq UP                  |\n");
+                printk("|     press g : freq DOWN                |\n");
                 printk("|     press u : phase shift UP           |\n");
                 printk("|     press d : phase shift DOWN         |\n");
                 printk("|________________________________________|\n\n");
@@ -260,6 +263,12 @@ void loop_communication_task()
             case 's':
                 printk("second bridge start \n");
                 pwm_enable_prim = true;
+            case 'f':
+                freq += 1000;
+                break;
+            case 'g':
+                freq -= 1000;
+                break;
             case 'u':
                 phase_shift += 0.5;
                 break;
@@ -279,6 +288,7 @@ void loop_communication_task()
  */
 void loop_application_task()
 {
+    printk("%u:", freq);
     printk("%f:", phase_shift);
     printk("%f:", VIhigh_value);
     printk("%f:", VIIhigh_value);
@@ -334,6 +344,7 @@ void loop_control_task()
     }
     else if(mode == POWERMODE)
     {
+        spin.pwm.changeFrequency(freq);
         // Soft start to 0.5 duty_cycle
         if(duty_cycle < 0.5)
         {

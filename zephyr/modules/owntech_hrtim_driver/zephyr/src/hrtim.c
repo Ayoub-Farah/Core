@@ -38,6 +38,7 @@ static const uint8_t HRTIM_IRQ_NUMBER = 67;
 static const uint8_t HRTIM_IRQ_PRIO = 0;
 static const uint8_t HRTIM_IRQ_FLAGS = 0;
 static float32_t HRTIM_CLK_RESOLUTION = 184e-6;
+static uint32_t HRTIM_MINIM_FREQUENCY = TU_DEFAULT_FREQ;
 
 /* User callback for ISR */
 static hrtim_callback_t user_callback = NULL;
@@ -233,6 +234,7 @@ void _init_master()
     /* At start-up, it is mandatory to initialize first the prescaler
      * bitfields before writing the compare and period registers. */
     timerMaster.pwm_conf.frequency = _period_ckpsc(timerMaster.pwm_conf.frequency, &timerMaster);
+    HRTIM_MINIM_FREQUENCY = timerMaster.pwm_conf.frequency;
 
     /* master timer prescaler init */
     LL_HRTIM_TIM_SetPrescaler(HRTIM1, LL_HRTIM_TIMER_MASTER, timerMaster.pwm_conf.ckpsc);
@@ -906,27 +908,21 @@ uint32_t hrtim_change_frequency(uint32_t new_frequency)
     float32_t duty_cycle;
     uint32_t period = ((f_hrtim / new_frequency) * 32 + (f_hrtim % new_frequency) * 32 / new_frequency) / (1 << timerMaster.pwm_conf.ckpsc);
 
-    timerMaster.pwm_conf.frequency = new_frequency;
-    tu_channel[PWMA]->pwm_conf.frequency = new_frequency;
-    tu_channel[PWMB]->pwm_conf.frequency = new_frequency;
-    tu_channel[PWMC]->pwm_conf.frequency = new_frequency;
-    tu_channel[PWMD]->pwm_conf.frequency = new_frequency;
-    tu_channel[PWME]->pwm_conf.frequency = new_frequency;
-    tu_channel[PWMF]->pwm_conf.frequency = new_frequency;
-
-    tu_channel[PWMB]->pwm_conf.period = period/2;
-    tu_channel[PWMC]->pwm_conf.period = period/2;
-    tu_channel[PWMD]->pwm_conf.period = period/2;
-    tu_channel[PWME]->pwm_conf.period = period/2;
-    tu_channel[PWMF]->pwm_conf.period = period/2;
-
-    if(timerMaster.pwm_conf.frequency <= new_frequency)
+    if(HRTIM_MINIM_FREQUENCY <= new_frequency)
     {
+        timerMaster.pwm_conf.frequency = new_frequency;
+        tu_channel[PWMA]->pwm_conf.frequency = new_frequency;
+        tu_channel[PWMB]->pwm_conf.frequency = new_frequency;
+        tu_channel[PWMC]->pwm_conf.frequency = new_frequency;
+        tu_channel[PWMD]->pwm_conf.frequency = new_frequency;
+        tu_channel[PWME]->pwm_conf.frequency = new_frequency;
+        tu_channel[PWMF]->pwm_conf.frequency = new_frequency;
+
         LL_HRTIM_TIM_SetPeriod(HRTIM1, LL_HRTIM_TIMER_MASTER, period);
         timerMaster.pwm_conf.period = period;
 
         duty_cycle = (float32_t)LL_HRTIM_TIM_GetCompare1(HRTIM1, LL_HRTIM_TIMER_A)/(float32_t)LL_HRTIM_TIM_GetPeriod(HRTIM1, LL_HRTIM_TIMER_A);
-        if(timerA.pwm_conf.modulation = UpDwn)
+        if(timerA.pwm_conf.modulation == UpDwn)
         {
             LL_HRTIM_TIM_SetPeriod(HRTIM1, LL_HRTIM_TIMER_A, period/2);
             LL_HRTIM_TIM_SetCompare1(HRTIM1, LL_HRTIM_TIMER_A, duty_cycle*period/2);
@@ -940,7 +936,7 @@ uint32_t hrtim_change_frequency(uint32_t new_frequency)
         }
 
         duty_cycle = (float32_t)LL_HRTIM_TIM_GetCompare1(HRTIM1, LL_HRTIM_TIMER_B)/(float32_t)LL_HRTIM_TIM_GetPeriod(HRTIM1, LL_HRTIM_TIMER_B);
-        if(timerB.pwm_conf.modulation = UpDwn)
+        if(timerB.pwm_conf.modulation == UpDwn)
         {
             LL_HRTIM_TIM_SetPeriod(HRTIM1, LL_HRTIM_TIMER_B, period/2);
             LL_HRTIM_TIM_SetCompare1(HRTIM1, LL_HRTIM_TIMER_B, duty_cycle*period/2);
@@ -954,7 +950,7 @@ uint32_t hrtim_change_frequency(uint32_t new_frequency)
         }
 
         duty_cycle = (float32_t)LL_HRTIM_TIM_GetCompare1(HRTIM1, LL_HRTIM_TIMER_C)/(float32_t)LL_HRTIM_TIM_GetPeriod(HRTIM1, LL_HRTIM_TIMER_C);
-        if(timerC.pwm_conf.modulation = UpDwn)
+        if(timerC.pwm_conf.modulation == UpDwn)
         {
             LL_HRTIM_TIM_SetPeriod(HRTIM1, LL_HRTIM_TIMER_C, period/2);
             LL_HRTIM_TIM_SetCompare1(HRTIM1, LL_HRTIM_TIMER_C, duty_cycle*period/2);
@@ -969,7 +965,7 @@ uint32_t hrtim_change_frequency(uint32_t new_frequency)
         }
 
         duty_cycle = (float32_t)LL_HRTIM_TIM_GetCompare1(HRTIM1, LL_HRTIM_TIMER_D)/(float32_t)LL_HRTIM_TIM_GetPeriod(HRTIM1, LL_HRTIM_TIMER_D);
-        if(timerD.pwm_conf.modulation = UpDwn)
+        if(timerD.pwm_conf.modulation == UpDwn)
         {
             LL_HRTIM_TIM_SetPeriod(HRTIM1, LL_HRTIM_TIMER_D, period/2);
             LL_HRTIM_TIM_SetCompare1(HRTIM1, LL_HRTIM_TIMER_D, duty_cycle*period/2);
@@ -983,7 +979,7 @@ uint32_t hrtim_change_frequency(uint32_t new_frequency)
         }
 
         duty_cycle = (float32_t)LL_HRTIM_TIM_GetCompare1(HRTIM1, LL_HRTIM_TIMER_E)/(float32_t)LL_HRTIM_TIM_GetPeriod(HRTIM1, LL_HRTIM_TIMER_E);
-        if(timerE.pwm_conf.modulation = UpDwn)
+        if(timerE.pwm_conf.modulation == UpDwn)
         {
             LL_HRTIM_TIM_SetPeriod(HRTIM1, LL_HRTIM_TIMER_E, period/2);
             LL_HRTIM_TIM_SetCompare1(HRTIM1, LL_HRTIM_TIMER_E, duty_cycle*period/2);
@@ -998,7 +994,7 @@ uint32_t hrtim_change_frequency(uint32_t new_frequency)
         }
 
         duty_cycle = (float32_t)LL_HRTIM_TIM_GetCompare1(HRTIM1, LL_HRTIM_TIMER_F)/(float32_t)LL_HRTIM_TIM_GetPeriod(HRTIM1, LL_HRTIM_TIMER_F);
-        if(timerF.pwm_conf.modulation = UpDwn)
+        if(timerF.pwm_conf.modulation == UpDwn)
         {
             LL_HRTIM_TIM_SetPeriod(HRTIM1, LL_HRTIM_TIMER_F, period/2);
             LL_HRTIM_TIM_SetCompare1(HRTIM1, LL_HRTIM_TIMER_F, duty_cycle*period/2);

@@ -146,6 +146,7 @@ static inline uint32_t _period_ckpsc(uint32_t freq, timer_hrtim_t *tu)
     /* period = t_hrck / 2^ckpsc so bits over 15 position directly give
      * the needed prescaller */
     tu->pwm_conf.ckpsc = (_msb(period) > 15) ? _msb(period) - 15 : 0;
+    tu->pwm_conf.ckpsc = timerMaster.pwm_conf.ckpsc;
     period /= (1 << tu->pwm_conf.ckpsc);
 
     /* From the f334 reference manual :
@@ -553,7 +554,7 @@ inline uint16_t hrtim_period_get(hrtim_tu_number_t tu_number)
 
 uint32_t hrtim_period_Master_get_us()
 {
-    return timerMaster.pwm_conf.period * HRTIM_CLK_RESOLUTION;
+    return timerMaster.pwm_conf.period * HRTIM_CLK_RESOLUTION * (1<<timerMaster.pwm_conf.ckpsc);
 }
 
 uint32_t hrtim_period_get_us(hrtim_tu_number_t tu_number)
@@ -561,7 +562,7 @@ uint32_t hrtim_period_get_us(hrtim_tu_number_t tu_number)
     uint32_t mult = 1;
     if (tu_channel[tu_number]->pwm_conf.modulation == UpDwn)
         mult = 2;
-    return tu_channel[tu_number]->pwm_conf.period * HRTIM_CLK_RESOLUTION * mult;
+    return tu_channel[tu_number]->pwm_conf.period * HRTIM_CLK_RESOLUTION * mult * (1<<timerMaster.pwm_conf.ckpsc);
 }
 
 /* CMP1, CMP2 and CMP3 must not be changed in current mode since they are used */
@@ -714,7 +715,7 @@ void hrtim_phase_shift_set(hrtim_tu_number_t tu_number, uint16_t shift)
             break;
         }
     }
-    else if ((timerMaster.pwm_conf.period == tu_channel[tu_number]->pwm_conf.period && timerMaster.pwm_conf.ckpsc == tu_channel[tu_number]->pwm_conf.ckpsc) || (timerMaster.pwm_conf.period == 2 * (tu_channel[tu_number]->pwm_conf.period) && timerMaster.pwm_conf.ckpsc == tu_channel[tu_number]->pwm_conf.ckpsc))
+    else if ((timerMaster.pwm_conf.period == tu_channel[tu_number]->pwm_conf.period && timerMaster.pwm_conf.ckpsc == tu_channel[tu_number]->pwm_conf.ckpsc) || (timerMaster.pwm_conf.period/2u == (tu_channel[tu_number]->pwm_conf.period) && timerMaster.pwm_conf.ckpsc == tu_channel[tu_number]->pwm_conf.ckpsc))
     {
         /* shift == 0 and timing unit run at the same frequency as master */
         if (tu_channel[tu_number]->pwm_conf.pwm_tu != TIMA)
@@ -905,34 +906,110 @@ uint32_t hrtim_change_frequency(uint32_t new_frequency)
     float32_t duty_cycle;
     uint32_t period = ((f_hrtim / new_frequency) * 32 + (f_hrtim % new_frequency) * 32 / new_frequency) / (1 << timerMaster.pwm_conf.ckpsc);
 
+    timerMaster.pwm_conf.frequency = new_frequency;
+    tu_channel[PWMA]->pwm_conf.frequency = new_frequency;
+    tu_channel[PWMB]->pwm_conf.frequency = new_frequency;
+    tu_channel[PWMC]->pwm_conf.frequency = new_frequency;
+    tu_channel[PWMD]->pwm_conf.frequency = new_frequency;
+    tu_channel[PWME]->pwm_conf.frequency = new_frequency;
+    tu_channel[PWMF]->pwm_conf.frequency = new_frequency;
+
+    tu_channel[PWMB]->pwm_conf.period = period/2;
+    tu_channel[PWMC]->pwm_conf.period = period/2;
+    tu_channel[PWMD]->pwm_conf.period = period/2;
+    tu_channel[PWME]->pwm_conf.period = period/2;
+    tu_channel[PWMF]->pwm_conf.period = period/2;
+
     if(timerMaster.pwm_conf.frequency <= new_frequency)
     {
         LL_HRTIM_TIM_SetPeriod(HRTIM1, LL_HRTIM_TIMER_MASTER, period);
+        timerMaster.pwm_conf.period = period;
 
         duty_cycle = (float32_t)LL_HRTIM_TIM_GetCompare1(HRTIM1, LL_HRTIM_TIMER_A)/(float32_t)LL_HRTIM_TIM_GetPeriod(HRTIM1, LL_HRTIM_TIMER_A);
-        LL_HRTIM_TIM_SetPeriod(HRTIM1, LL_HRTIM_TIMER_A, period);
-        LL_HRTIM_TIM_SetCompare1(HRTIM1, LL_HRTIM_TIMER_A, duty_cycle*period);
-
-        duty_cycle = (float32_t)LL_HRTIM_TIM_GetCompare1(HRTIM1, LL_HRTIM_TIMER_C)/(float32_t)LL_HRTIM_TIM_GetPeriod(HRTIM1, LL_HRTIM_TIMER_C);
-        LL_HRTIM_TIM_SetPeriod(HRTIM1, LL_HRTIM_TIMER_C, period);
-        LL_HRTIM_TIM_SetCompare1(HRTIM1, LL_HRTIM_TIMER_C, duty_cycle*period);
-
-        duty_cycle = (float32_t)LL_HRTIM_TIM_GetCompare1(HRTIM1, LL_HRTIM_TIMER_D)/(float32_t)LL_HRTIM_TIM_GetPeriod(HRTIM1, LL_HRTIM_TIMER_D);
-        LL_HRTIM_TIM_SetPeriod(HRTIM1, LL_HRTIM_TIMER_D, period);
-        LL_HRTIM_TIM_SetCompare1(HRTIM1, LL_HRTIM_TIMER_D, duty_cycle*period);
-
-        duty_cycle = (float32_t)LL_HRTIM_TIM_GetCompare1(HRTIM1, LL_HRTIM_TIMER_E)/(float32_t)LL_HRTIM_TIM_GetPeriod(HRTIM1, LL_HRTIM_TIMER_E);
-        LL_HRTIM_TIM_SetPeriod(HRTIM1, LL_HRTIM_TIMER_E, period);
-        LL_HRTIM_TIM_SetCompare1(HRTIM1, LL_HRTIM_TIMER_E, duty_cycle*period);
-
-        duty_cycle = (float32_t)LL_HRTIM_TIM_GetCompare1(HRTIM1, LL_HRTIM_TIMER_F)/(float32_t)LL_HRTIM_TIM_GetPeriod(HRTIM1, LL_HRTIM_TIMER_F);
-        LL_HRTIM_TIM_SetPeriod(HRTIM1, LL_HRTIM_TIMER_F, period);
-        LL_HRTIM_TIM_SetCompare1(HRTIM1, LL_HRTIM_TIMER_F, duty_cycle*period);
+        if(timerA.pwm_conf.modulation = UpDwn)
+        {
+            LL_HRTIM_TIM_SetPeriod(HRTIM1, LL_HRTIM_TIMER_A, period/2);
+            LL_HRTIM_TIM_SetCompare1(HRTIM1, LL_HRTIM_TIMER_A, duty_cycle*period/2);
+            tu_channel[PWMA]->pwm_conf.period = period/2;
+        }
+        else 
+        {
+            LL_HRTIM_TIM_SetPeriod(HRTIM1, LL_HRTIM_TIMER_A, period);
+            LL_HRTIM_TIM_SetCompare1(HRTIM1, LL_HRTIM_TIMER_A, duty_cycle*period);
+            tu_channel[PWMA]->pwm_conf.period = period;
+        }
 
         duty_cycle = (float32_t)LL_HRTIM_TIM_GetCompare1(HRTIM1, LL_HRTIM_TIMER_B)/(float32_t)LL_HRTIM_TIM_GetPeriod(HRTIM1, LL_HRTIM_TIMER_B);
-        LL_HRTIM_TIM_SetPeriod(HRTIM1, LL_HRTIM_TIMER_B, period);
-        LL_HRTIM_TIM_SetCompare1(HRTIM1, LL_HRTIM_TIMER_B, duty_cycle*period);
+        if(timerB.pwm_conf.modulation = UpDwn)
+        {
+            LL_HRTIM_TIM_SetPeriod(HRTIM1, LL_HRTIM_TIMER_B, period/2);
+            LL_HRTIM_TIM_SetCompare1(HRTIM1, LL_HRTIM_TIMER_B, duty_cycle*period/2);
+            tu_channel[PWMB]->pwm_conf.period = period/2;
+        }
+        else 
+        {
+            LL_HRTIM_TIM_SetPeriod(HRTIM1, LL_HRTIM_TIMER_B, period);
+            LL_HRTIM_TIM_SetCompare1(HRTIM1, LL_HRTIM_TIMER_B, duty_cycle*period);
+            tu_channel[PWMB]->pwm_conf.period = period;
+        }
 
+        duty_cycle = (float32_t)LL_HRTIM_TIM_GetCompare1(HRTIM1, LL_HRTIM_TIMER_C)/(float32_t)LL_HRTIM_TIM_GetPeriod(HRTIM1, LL_HRTIM_TIMER_C);
+        if(timerC.pwm_conf.modulation = UpDwn)
+        {
+            LL_HRTIM_TIM_SetPeriod(HRTIM1, LL_HRTIM_TIMER_C, period/2);
+            LL_HRTIM_TIM_SetCompare1(HRTIM1, LL_HRTIM_TIMER_C, duty_cycle*period/2);
+            tu_channel[PWMC]->pwm_conf.period = period/2;
+        }
+        else 
+        {
+            LL_HRTIM_TIM_SetPeriod(HRTIM1, LL_HRTIM_TIMER_C, period);
+            LL_HRTIM_TIM_SetCompare1(HRTIM1, LL_HRTIM_TIMER_C, duty_cycle*period);
+            tu_channel[PWMC]->pwm_conf.period = period;
+
+        }
+
+        duty_cycle = (float32_t)LL_HRTIM_TIM_GetCompare1(HRTIM1, LL_HRTIM_TIMER_D)/(float32_t)LL_HRTIM_TIM_GetPeriod(HRTIM1, LL_HRTIM_TIMER_D);
+        if(timerD.pwm_conf.modulation = UpDwn)
+        {
+            LL_HRTIM_TIM_SetPeriod(HRTIM1, LL_HRTIM_TIMER_D, period/2);
+            LL_HRTIM_TIM_SetCompare1(HRTIM1, LL_HRTIM_TIMER_D, duty_cycle*period/2);
+            tu_channel[PWMD]->pwm_conf.period = period/2;
+        }
+        else 
+        {
+            LL_HRTIM_TIM_SetPeriod(HRTIM1, LL_HRTIM_TIMER_D, period);
+            LL_HRTIM_TIM_SetCompare1(HRTIM1, LL_HRTIM_TIMER_D, duty_cycle*period);
+            tu_channel[PWMD]->pwm_conf.period = period;
+        }
+
+        duty_cycle = (float32_t)LL_HRTIM_TIM_GetCompare1(HRTIM1, LL_HRTIM_TIMER_E)/(float32_t)LL_HRTIM_TIM_GetPeriod(HRTIM1, LL_HRTIM_TIMER_E);
+        if(timerE.pwm_conf.modulation = UpDwn)
+        {
+            LL_HRTIM_TIM_SetPeriod(HRTIM1, LL_HRTIM_TIMER_E, period/2);
+            LL_HRTIM_TIM_SetCompare1(HRTIM1, LL_HRTIM_TIMER_E, duty_cycle*period/2);
+            tu_channel[PWME]->pwm_conf.period = period/2;
+        }
+        else 
+        {
+            LL_HRTIM_TIM_SetPeriod(HRTIM1, LL_HRTIM_TIMER_E, period);
+            LL_HRTIM_TIM_SetCompare1(HRTIM1, LL_HRTIM_TIMER_E, duty_cycle*period);
+            tu_channel[PWME]->pwm_conf.period = period;
+
+        }
+
+        duty_cycle = (float32_t)LL_HRTIM_TIM_GetCompare1(HRTIM1, LL_HRTIM_TIMER_F)/(float32_t)LL_HRTIM_TIM_GetPeriod(HRTIM1, LL_HRTIM_TIMER_F);
+        if(timerF.pwm_conf.modulation = UpDwn)
+        {
+            LL_HRTIM_TIM_SetPeriod(HRTIM1, LL_HRTIM_TIMER_F, period/2);
+            LL_HRTIM_TIM_SetCompare1(HRTIM1, LL_HRTIM_TIMER_F, duty_cycle*period/2);
+            tu_channel[PWMF]->pwm_conf.period = period/2;
+        }
+        else 
+        {
+            LL_HRTIM_TIM_SetPeriod(HRTIM1, LL_HRTIM_TIMER_F, period);
+            LL_HRTIM_TIM_SetCompare1(HRTIM1, LL_HRTIM_TIMER_F, duty_cycle*period);
+            tu_channel[PWMF]->pwm_conf.period = period;
+        }
     }
 
     return period;

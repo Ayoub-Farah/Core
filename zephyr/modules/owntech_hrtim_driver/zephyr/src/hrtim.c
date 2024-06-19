@@ -144,9 +144,18 @@ static inline uint32_t _period_ckpsc(uint32_t freq, timer_hrtim_t *tu)
      * the modulo to preserve accuracy. */
     uint32_t period = (f_hrtim / freq) * 32 + (f_hrtim % freq) * 32 / freq;
 
+    /* The period_max is the desired maximum period (or minimum frequency) to reach */
+    uint32_t period_max = (f_hrtim / HRTIM_MINIM_FREQUENCY) * 32 + (f_hrtim % HRTIM_MINIM_FREQUENCY) * 32 / HRTIM_MINIM_FREQUENCY;
+
     /* period = t_hrck / 2^ckpsc so bits over 15 position directly give
-     * the needed prescaller */
-    tu->pwm_conf.ckpsc = (_msb(period) > 15) ? _msb(period) - 15 : 0;
+     * the needed prescaller. This prescaler is chosen based on the minimum 
+     * desired frequency. */
+    tu->pwm_conf.ckpsc = (_msb(period_max) > 15) ? _msb(period_max) - 15 : 0;
+
+    /** 
+     * All the timing unit receive the same prescaler as the master to 
+     * make sure that they are synchronized.
+    */
     tu->pwm_conf.ckpsc = timerMaster.pwm_conf.ckpsc;
     period /= (1 << tu->pwm_conf.ckpsc);
 
@@ -657,11 +666,45 @@ hrtim_external_trigger_t hrtim_eev_get(hrtim_tu_number_t tu_number)
 
 void hrtim_dt_set(hrtim_tu_number_t tu_number, uint16_t rise_ns, uint16_t fall_ns)
 {
+    #if defined(CONFIG_SOC_SERIES_STM32F3X)
+        uint32_t f_hrtim = hrtim_get_apb2_clock() * 2;
+    #elif defined(CONFIG_SOC_SERIES_STM32G4X)
+        uint32_t f_hrtim = hrtim_get_apb2_clock();
+    #else
+    #warning "unsupported stm32XX family"
+    #endif
+
     tu_channel[tu_number]->pwm_conf.rise_dead_time = rise_ns; // updates the rise dead time on the structure
     tu_channel[tu_number]->pwm_conf.fall_dead_time = fall_ns; // updates the fall dead time on the structure
-    hrtim_cnt_dis(tu_number);                                 // Disable the timing unit counter
-    hrtim_dt_init(tu_number);                                 // Set the dead time. Note: this must be done before enable counter
-    hrtim_cnt_en(tu_number);                                  // Enable counter
+    // hrtim_cnt_dis(tu_number);                                 // Disable the timing unit counter
+    // hrtim_dt_init(tu_number);                                 // Set the dead time. Note: this must be done before enable counter
+    // hrtim_cnt_en(tu_number);                                  // Enable counter
+
+    uint16_t rise_dt = 0;
+    uint16_t fall_dt = 0;
+    uint32_t rise_ps = rise_ns * 1000;
+    uint32_t fall_ps = fall_ns * 1000;
+    uint8_t dtpsc = (HRTIM1->sTimerxRegs[tu_number].DTxR>>10U)&(0x7); // intermediate gain for dead time calculation
+    uint32_t t_dtg_ps = (1 << dtpsc) * 1000000 / ((f_hrtim * 8) / 1000000); // intermediate gain for dead time calculation
+    
+
+    rise_dt = rise_ps / t_dtg_ps; // calculate the register value based on desired deadtime in picoseconds
+
+    if (rise_dt > 511)
+    {
+        rise_dt = 511;
+    }
+
+    fall_dt = fall_ps / t_dtg_ps; // calculate the register value based on desired deadtime in picoseconds
+
+    if (fall_dt > 511)
+    {
+        fall_dt = 511;
+    }
+
+    LL_HRTIM_DT_SetFallingValue(HRTIM1, tu_channel[tu_number]->pwm_conf.pwm_tu, fall_dt); // Deadtime falling edge value
+
+    LL_HRTIM_DT_SetRisingValue(HRTIM1, tu_channel[tu_number]->pwm_conf.pwm_tu, rise_dt); // Deadtime rising edge value
 }
 
 /* Duty_cycle should not be set if we are in current mode */
@@ -739,6 +782,8 @@ void hrtim_phase_shift_set(hrtim_tu_number_t tu_number, uint16_t shift)
  * must be taken into account when calculating the PWM duty cycle */
 void hrtim_dt_init(hrtim_tu_number_t tu_number)
 {
+
+LL_HRTIM_TIM_DisableDeadTime(HRTIM1, tu_channel[tu_number]->pwm_conf.pwm_tu);
     uint32_t rise_ps = tu_channel[tu_number]->pwm_conf.rise_dead_time * 1000;
     uint32_t fall_ps = tu_channel[tu_number]->pwm_conf.fall_dead_time * 1000;
 /* t_dtg = (2^dtpsc) * (t_hrtim / 8)
@@ -751,35 +796,70 @@ void hrtim_dt_init(hrtim_tu_number_t tu_number)
 #warning "unsupported stm32XX family"
 #endif
 
-    uint8_t dtpsc = 0;                                                      // Deadtime clock prescaler set at xx
+    uint8_t dtpsc = 0; // Deadtime clock prescaler set at xx
+    uint16_t rise_dt = 0;
+    uint16_t fall_dt = 0;
     uint32_t t_dtg_ps = (1 << dtpsc) * 1000000 / ((f_hrtim * 8) / 1000000); // intermediate gain for dead time calculation
-    uint16_t rise_dt = rise_ps / t_dtg_ps;                                  // calculate the register value based on desired deadtime in picoseconds
 
-    while (rise_dt > 511 && dtpsc < 7)
+    if(rise_ps >= fall_ps)
     {
-        dtpsc++;
-        t_dtg_ps = (1 << dtpsc) * 1000000 / ((f_hrtim * 8) / 1000000);
-        rise_dt = rise_ps / t_dtg_ps;
+        rise_dt = rise_ps / t_dtg_ps; // calculate the register value based on desired deadtime in picoseconds
+
+        while (rise_dt > 511 && dtpsc < 7)
+        {
+            dtpsc++;
+            t_dtg_ps = (1 << dtpsc) * 1000000 / ((f_hrtim * 8) / 1000000);
+            rise_dt = rise_ps / t_dtg_ps;
+        }
+        if (rise_dt > 511)
+        {
+            rise_dt = 511;
+        }
+
+        fall_dt = fall_ps / t_dtg_ps; // calculate the register value based on desired deadtime in picoseconds
+
+        while (fall_dt > 511 && dtpsc < 7)
+        {
+            dtpsc++;
+            t_dtg_ps = (1 << dtpsc) * 1000000 / ((f_hrtim * 8) / 1000000);
+            fall_dt = fall_ps / t_dtg_ps;
+        }
+        if (fall_dt > 511)
+        {
+            fall_dt = 511;
+        }
     }
-    if (rise_dt > 511)
-    {
-        rise_dt = 511;
+    else if(rise_ps < fall_ps){
+        fall_dt = fall_ps / t_dtg_ps; // calculate the register value based on desired deadtime in picoseconds
+
+        while (fall_dt > 511 && dtpsc < 7)
+        {
+            dtpsc++;
+            t_dtg_ps = (1 << dtpsc) * 1000000 / ((f_hrtim * 8) / 1000000);
+            fall_dt = fall_ps / t_dtg_ps;
+        }
+        if (fall_dt > 511)
+        {
+            fall_dt = 511;
+        }
+
+        rise_dt = rise_ps / t_dtg_ps; // calculate the register value based on desired deadtime in picoseconds
+
+        while (rise_dt > 511 && dtpsc < 7)
+        {
+            dtpsc++;
+            t_dtg_ps = (1 << dtpsc) * 1000000 / ((f_hrtim * 8) / 1000000);
+            rise_dt = rise_ps / t_dtg_ps;
+        }
+        if (rise_dt > 511)
+        {
+            rise_dt = 511;
+        }
+
     }
 
-    uint16_t fall_dt = fall_ps / t_dtg_ps; // calculate the register value based on desired deadtime in picoseconds
-
-    while (fall_dt > 511 && dtpsc < 7)
-    {
-        dtpsc++;
-        t_dtg_ps = (1 << dtpsc) * 1000000 / ((f_hrtim * 8) / 1000000);
-        fall_dt = fall_ps / t_dtg_ps;
-    }
-    if (fall_dt > 511)
-    {
-        fall_dt = 511;
-    }
-
-    LL_HRTIM_DT_SetPrescaler(HRTIM1, tu_channel[tu_number]->pwm_conf.pwm_tu, dtpsc); // Deadtime clock prescaler
+    /* Prescaler is in the 10th position of the dead time register */
+    LL_HRTIM_DT_SetPrescaler(HRTIM1, tu_channel[tu_number]->pwm_conf.pwm_tu, dtpsc<<10U); // Deadtime clock prescaler
 
     LL_HRTIM_DT_SetFallingValue(HRTIM1, tu_channel[tu_number]->pwm_conf.pwm_tu, fall_dt); // Deadtime falling edge value
 
@@ -906,6 +986,7 @@ uint32_t hrtim_change_frequency(uint32_t new_frequency)
 {
     uint32_t f_hrtim = hrtim_get_apb2_clock();
     float32_t duty_cycle;
+    float32_t phase_shift;
     uint32_t period = ((f_hrtim / new_frequency) * 32 + (f_hrtim % new_frequency) * 32 / new_frequency) / (1 << timerMaster.pwm_conf.ckpsc);
 
     if(HRTIM_MINIM_FREQUENCY <= new_frequency)
@@ -936,74 +1017,89 @@ uint32_t hrtim_change_frequency(uint32_t new_frequency)
         }
 
         duty_cycle = (float32_t)LL_HRTIM_TIM_GetCompare1(HRTIM1, LL_HRTIM_TIMER_B)/(float32_t)LL_HRTIM_TIM_GetPeriod(HRTIM1, LL_HRTIM_TIMER_B);
+        phase_shift = (float32_t)LL_HRTIM_TIM_GetCompare2(HRTIM1, LL_HRTIM_TIMER_A)/(float32_t)LL_HRTIM_TIM_GetPeriod(HRTIM1, LL_HRTIM_TIMER_B);
         if(timerB.pwm_conf.modulation == UpDwn)
         {
             LL_HRTIM_TIM_SetPeriod(HRTIM1, LL_HRTIM_TIMER_B, period/2);
             LL_HRTIM_TIM_SetCompare1(HRTIM1, LL_HRTIM_TIMER_B, duty_cycle*period/2);
+            hrtim_phase_shift_set(PWMB, phase_shift*period/2);
             tu_channel[PWMB]->pwm_conf.period = period/2;
         }
         else 
         {
             LL_HRTIM_TIM_SetPeriod(HRTIM1, LL_HRTIM_TIMER_B, period);
             LL_HRTIM_TIM_SetCompare1(HRTIM1, LL_HRTIM_TIMER_B, duty_cycle*period);
+            hrtim_phase_shift_set(PWMB, phase_shift*period);
             tu_channel[PWMB]->pwm_conf.period = period;
         }
 
         duty_cycle = (float32_t)LL_HRTIM_TIM_GetCompare1(HRTIM1, LL_HRTIM_TIMER_C)/(float32_t)LL_HRTIM_TIM_GetPeriod(HRTIM1, LL_HRTIM_TIMER_C);
+        phase_shift = (float32_t)LL_HRTIM_TIM_GetCompare2(HRTIM1, LL_HRTIM_TIMER_MASTER)/(float32_t)LL_HRTIM_TIM_GetPeriod(HRTIM1, LL_HRTIM_TIMER_C);
         if(timerC.pwm_conf.modulation == UpDwn)
         {
             LL_HRTIM_TIM_SetPeriod(HRTIM1, LL_HRTIM_TIMER_C, period/2);
             LL_HRTIM_TIM_SetCompare1(HRTIM1, LL_HRTIM_TIMER_C, duty_cycle*period/2);
+            hrtim_phase_shift_set(PWMC, phase_shift*period/2);
             tu_channel[PWMC]->pwm_conf.period = period/2;
         }
         else 
         {
             LL_HRTIM_TIM_SetPeriod(HRTIM1, LL_HRTIM_TIMER_C, period);
             LL_HRTIM_TIM_SetCompare1(HRTIM1, LL_HRTIM_TIMER_C, duty_cycle*period);
+            hrtim_phase_shift_set(PWMC, phase_shift*period);
             tu_channel[PWMC]->pwm_conf.period = period;
 
         }
 
         duty_cycle = (float32_t)LL_HRTIM_TIM_GetCompare1(HRTIM1, LL_HRTIM_TIMER_D)/(float32_t)LL_HRTIM_TIM_GetPeriod(HRTIM1, LL_HRTIM_TIMER_D);
+        phase_shift = (float32_t)LL_HRTIM_TIM_GetCompare3(HRTIM1, LL_HRTIM_TIMER_MASTER)/(float32_t)LL_HRTIM_TIM_GetPeriod(HRTIM1, LL_HRTIM_TIMER_D);
         if(timerD.pwm_conf.modulation == UpDwn)
         {
             LL_HRTIM_TIM_SetPeriod(HRTIM1, LL_HRTIM_TIMER_D, period/2);
             LL_HRTIM_TIM_SetCompare1(HRTIM1, LL_HRTIM_TIMER_D, duty_cycle*period/2);
+            hrtim_phase_shift_set(PWMD, phase_shift*period/2);
             tu_channel[PWMD]->pwm_conf.period = period/2;
         }
         else 
         {
             LL_HRTIM_TIM_SetPeriod(HRTIM1, LL_HRTIM_TIMER_D, period);
             LL_HRTIM_TIM_SetCompare1(HRTIM1, LL_HRTIM_TIMER_D, duty_cycle*period);
+            hrtim_phase_shift_set(PWMD, phase_shift*period);
             tu_channel[PWMD]->pwm_conf.period = period;
         }
 
         duty_cycle = (float32_t)LL_HRTIM_TIM_GetCompare1(HRTIM1, LL_HRTIM_TIMER_E)/(float32_t)LL_HRTIM_TIM_GetPeriod(HRTIM1, LL_HRTIM_TIMER_E);
+        phase_shift = (float32_t)LL_HRTIM_TIM_GetCompare4(HRTIM1, LL_HRTIM_TIMER_MASTER)/(float32_t)LL_HRTIM_TIM_GetPeriod(HRTIM1, LL_HRTIM_TIMER_E);
         if(timerE.pwm_conf.modulation == UpDwn)
         {
             LL_HRTIM_TIM_SetPeriod(HRTIM1, LL_HRTIM_TIMER_E, period/2);
             LL_HRTIM_TIM_SetCompare1(HRTIM1, LL_HRTIM_TIMER_E, duty_cycle*period/2);
+            hrtim_phase_shift_set(PWME, phase_shift*period/2);
             tu_channel[PWME]->pwm_conf.period = period/2;
         }
         else 
         {
             LL_HRTIM_TIM_SetPeriod(HRTIM1, LL_HRTIM_TIMER_E, period);
             LL_HRTIM_TIM_SetCompare1(HRTIM1, LL_HRTIM_TIMER_E, duty_cycle*period);
+            hrtim_phase_shift_set(PWME, phase_shift*period);
             tu_channel[PWME]->pwm_conf.period = period;
 
         }
 
         duty_cycle = (float32_t)LL_HRTIM_TIM_GetCompare1(HRTIM1, LL_HRTIM_TIMER_F)/(float32_t)LL_HRTIM_TIM_GetPeriod(HRTIM1, LL_HRTIM_TIMER_F);
+        phase_shift = (float32_t)LL_HRTIM_TIM_GetCompare1(HRTIM1, LL_HRTIM_TIMER_MASTER)/(float32_t)LL_HRTIM_TIM_GetPeriod(HRTIM1, LL_HRTIM_TIMER_F);
         if(timerF.pwm_conf.modulation == UpDwn)
         {
             LL_HRTIM_TIM_SetPeriod(HRTIM1, LL_HRTIM_TIMER_F, period/2);
             LL_HRTIM_TIM_SetCompare1(HRTIM1, LL_HRTIM_TIMER_F, duty_cycle*period/2);
+            hrtim_phase_shift_set(PWMF, phase_shift*period/2);
             tu_channel[PWMF]->pwm_conf.period = period/2;
         }
         else 
         {
             LL_HRTIM_TIM_SetPeriod(HRTIM1, LL_HRTIM_TIMER_F, period);
             LL_HRTIM_TIM_SetCompare1(HRTIM1, LL_HRTIM_TIMER_F, duty_cycle*period);
+            hrtim_phase_shift_set(PWMF, phase_shift*period);
             tu_channel[PWMF]->pwm_conf.period = period;
         }
     }

@@ -157,8 +157,8 @@ int8_t scheduling_define_uninterruptible_synchronous_task(task_function_t period
 		if (hrtim_period_us == 0)
 			return -1;
 
-		if (task_period_us % hrtim_period_us != 0)
-			return -1;
+		// if (task_period_us % hrtim_period_us != 0)
+		// 	return -1;
 
 		uint32_t repetition = task_period_us / hrtim_period_us;
 
@@ -171,7 +171,7 @@ int8_t scheduling_define_uninterruptible_synchronous_task(task_function_t period
 
 		uninterruptibleTaskStatus = task_status_t::defined;
 
-		return 0;
+		return hrtim_period_us;
 	}
 
 	return -1;

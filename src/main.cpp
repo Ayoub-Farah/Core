@@ -73,6 +73,8 @@ static float32_t VIhigh_value; //store value of ihigh (app task)
 static float32_t meas_data; //temp storage meas value (ctrl task)
 
 static bool soft_start = false;
+static uint16_t dt_rise_ns = 100;
+static uint16_t dt_fall_ns = 100;
 
 //--------------SETUP FUNCTIONS-------------------------------
 
@@ -118,16 +120,16 @@ void init_BridgeSec()
     spin.pwm.setModulation(PWME, UpDwn); // Set modulation
     spin.pwm.setSwitchConvention(PWME, PWMx1); // choose which output of the timer unit to control whith duty cycle
     spin.pwm.setMode(PWME, VOLTAGE_MODE);
+    spin.pwm.setDeadTime(PWME, 200, 1200); // Configure PWM dead time
     spin.pwm.initUnit(PWME); // Initialize leg unit
-    spin.pwm.setDeadTime(PWME, 100, 100); // Configure PWM dead time
     spin.pwm.setPhaseShift(PWME, 0);
 
     /* LEG2 TIMER F initialization */
     spin.pwm.setModulation(PWMF, UpDwn); // Set modulation
     spin.pwm.setSwitchConvention(PWMF, PWMx2); // choose which output of the timer unit to control whith duty cycle
     spin.pwm.setMode(PWMF, VOLTAGE_MODE);
+    spin.pwm.setDeadTime(PWMF, 700, 700); // Configure PWM dead time
     spin.pwm.initUnit(PWMF); // Initialize leg unit
-    spin.pwm.setDeadTime(PWMF, 100, 100); // Configure PWM dead time
     spin.pwm.setPhaseShift(PWMF, 0);
 }
 
@@ -217,13 +219,18 @@ void setup_routine()
 
     spin.pwm.setFrequency(freq); // Configure PWM frequency to 200kHz
 
+    // spin.gpio.configurePin(PC8, OUTPUT);
+
     init_BridgePrim();
     init_BridgeSec();
+
+    setPhaseShift_BridgeSec(180);
 
     // Then declare tasks
     uint32_t communication_task_number = task.createBackground(loop_communication_task);
     uint32_t application_task_number = task.createBackground(loop_application_task);
-    task.createCritical(loop_control_task, 100, source_tim6); // Uncomment if you use the critical task
+    uint8_t period = task.createCritical(loop_control_task, 100, source_tim6); // Uncomment if you use the critical task
+    printk("%u\n", period);
 
     // Finally, start tasks
     task.startBackground(communication_task_number);
@@ -263,6 +270,7 @@ void loop_communication_task()
             case 's':
                 printk("second bridge start \n");
                 pwm_enable_prim = true;
+                break;
             case 'f':
                 freq += 1000;
                 break;
@@ -271,9 +279,11 @@ void loop_communication_task()
                 break;
             case 'u':
                 phase_shift += 0.5;
+                dt_fall_ns += 5;
                 break;
             case 'd':
                 phase_shift -= 0.5;
+                dt_fall_ns -= 5;
                 break;
             default:
                 break;
@@ -306,7 +316,8 @@ void loop_application_task()
  */
 void loop_control_task()
 {
-
+    // spin.gpio.setPin(PC8);
+    
     meas_data = data.getLatest(V_HIGH);
     if (meas_data != -10000)
         VIIhigh_value = meas_data;
@@ -345,6 +356,8 @@ void loop_control_task()
     else if(mode == POWERMODE)
     {
         spin.pwm.changeFrequency(freq);
+        spin.pwm.setDeadTime(PWME, dt_rise_ns, dt_fall_ns);
+
         // Soft start to 0.5 duty_cycle
         if(duty_cycle < 0.5)
         {
@@ -360,7 +373,7 @@ void loop_control_task()
                 start_BridgePrim();
             }
 
-            setPhaseShift_BridgeSec(phase_shift);
+            // setPhaseShift_BridgeSec(phase_shift);
         }
         setDuty_BridgeSec(duty_cycle);
         if(!pwm_enable_sec)
@@ -370,6 +383,7 @@ void loop_control_task()
         }
     }
 
+    // spin.gpio.resetPin(PC8);
 }
 
 /**
